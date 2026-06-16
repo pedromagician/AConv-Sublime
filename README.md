@@ -1,6 +1,12 @@
 # Sublime Text 4 package using the AConv tool
 
-- text conversion for Amiga, Atari, and ZX
+Text conversion for Amiga, Atari, and ZX...
+
+# Installation:
+
+Copy to `\Sublime\Data\Packages\aconv\`
+
+---
 
 # AConv – Amiga/Atari/Windows/ZX Conversion Utility
 
