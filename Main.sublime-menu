@@ -1,0 +1,35 @@
+[
+    {
+        "caption": "Tools",
+        "id": "tools",
+        "children":
+        [
+            { "caption": "-" },
+
+            {
+                "caption": "AConv",
+                "mnemonic": "A",
+                "children":
+                [
+                    { "command": "aconv_run", "caption": "Convert current file" },
+                    { "caption": "-" },
+
+                    { "caption": "Quick Conversions" },
+                    { "command": "aconv_dec_to_hex", "caption": "DEC → HEX" },
+                    { "command": "aconv_dec_to_bin", "caption": "DEC → BIN" },
+                    { "command": "aconv_hex_to_dec", "caption": "HEX → DEC" },
+                    { "command": "aconv_hex_to_bin", "caption": "HEX → BIN" },
+                    { "command": "aconv_bin_to_dec", "caption": "BIN → DEC" },
+                    { "command": "aconv_bin_to_hex", "caption": "BIN → HEX" },
+                    { "command": "aconv_to_upper", "caption": "ToUpper" },
+                    { "command": "aconv_to_lower", "caption": "ToLower" },
+                    { "command": "aconv_remove_diacritics", "caption": "Remove Diacritics" },
+                    { "command": "aconv_to_ascii", "caption": "To ASCII" },
+
+                    { "caption": "-" },
+                    { "command": "open_file", "args": {"file": "${packages}/aconv/aconv.cfg"}, "caption": "Settings" }
+                ]
+            }
+        ]
+    }
+]

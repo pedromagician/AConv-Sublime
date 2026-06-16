@@ -1,0 +1,18 @@
+[
+    {
+        "caption": "AConv - Convert current file using AConv",
+        "command": "aconv_run"
+    },
+
+    { "caption": "AConv: DEC → HEX", "command": "aconv_dec_to_hex" },
+    { "caption": "AConv: DEC → BIN", "command": "aconv_dec_to_bin" },
+    { "caption": "AConv: HEX → DEC", "command": "aconv_hex_to_dec" },
+    { "caption": "AConv: HEX → BIN", "command": "aconv_hex_to_bin" },
+    { "caption": "AConv: BIN → DEC", "command": "aconv_bin_to_dec" },
+    { "caption": "AConv: BIN → HEX", "command": "aconv_bin_to_hex" },
+
+    { "caption": "AConv: ToUpper", "command": "aconv_to_upper" },
+    { "caption": "AConv: ToLower", "command": "aconv_to_lower" },
+    { "caption": "AConv: Remove Diacritics", "command": "aconv_remove_diacritics" },
+    { "caption": "AConv: To ASCII", "command": "aconv_to_ascii" }
+]
