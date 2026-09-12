@@ -6,6 +6,14 @@ import unicodedata
 import time
 
 class AconvRunCommand(sublime_plugin.WindowCommand):
+    # AConv.exe interprets backslashes in its arguments as escape sequences
+    # (used for escape-sequence dictionaries) and mangles Windows-style
+    # paths produced by os.path.join (e.g. "C:\Users\...\dict\x.dict").
+    # Forward slashes are accepted fine by Windows/AConv, so normalize
+    # every path we hand to the exe.
+    def to_exe_path(self, path):
+        return path.replace("\\", "/")
+
     def run_process_async(self, args, callback):
         def worker():
             proc = subprocess.Popen(args, shell=False)
@@ -149,7 +157,7 @@ class AconvRunCommand(sublime_plugin.WindowCommand):
         if self.view.is_dirty():
             sublime.error_message("The file has unsaved changes. An older version from disk will be used.")
 
-        cmd = [exe, "-i", input_path, "-detect", "-dict", dict_path]
+        cmd = [exe, "-i", self.to_exe_path(input_path), "-detect", "-dict", self.to_exe_path(dict_path)]
 
         try:
             output = subprocess.check_output(cmd, shell=False, stderr=subprocess.STDOUT)
@@ -321,7 +329,7 @@ class AconvRunCommand(sublime_plugin.WindowCommand):
             full_args = [exe]
             profile_args = ["-ic", "-oc"] + profile_args
         else:
-            full_args = [exe, "-i", input_path, "-o", output_path]
+            full_args = [exe, "-i", self.to_exe_path(input_path), "-o", self.to_exe_path(output_path)]
 
         profile_name = self.profiles[self.selected_profile][0]
 
@@ -348,7 +356,7 @@ class AconvRunCommand(sublime_plugin.WindowCommand):
                         sublime.error_message("Dictionary file not found:\n\n"+dict_name+"\n\nClipboard mode requires a '*_clipboard.dict' variant.\nPlease create it or disable clipboard mode for this profile.")
                         return
 
-                fixed_args.append(os.path.join(plugin_dir, "dict", dict_name))
+                fixed_args.append(self.to_exe_path(os.path.join(plugin_dir, "dict", dict_name)))
             else:
                 fixed_args.append(a)
 
