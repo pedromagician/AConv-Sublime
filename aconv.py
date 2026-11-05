@@ -2,8 +2,24 @@ import sublime
 import sublime_plugin
 import subprocess
 import os
-import unicodedata
-import time
+import sys
+import threading
+import locale
+
+def decode_output(data):
+    """Decode AConv.exe console output using the system code page."""
+    encoding = locale.getpreferredencoding(False) or "cp1250"
+    return data.decode(encoding, errors="replace").replace("\r", "")
+
+
+def open_read_only(window, path):
+    """Open `path` read-only (helper lives in the ToggleReadOnly package)."""
+    try:
+        from ToggleReadOnly.ReadOnly import open_read_only as helper
+    except ImportError:
+        return window.open_file(path)
+    return helper(window, path)
+
 
 class AconvRunCommand(sublime_plugin.WindowCommand):
     # AConv.exe interprets backslashes in its arguments as escape sequences
@@ -15,40 +31,66 @@ class AconvRunCommand(sublime_plugin.WindowCommand):
         return path.replace("\\", "/")
 
     def run_process_async(self, args, callback):
+        def fail(message):
+            sublime.set_timeout(lambda: sublime.error_message(message), 0)
+
         def worker():
-            proc = subprocess.Popen(args, shell=False)
-            proc.wait()
-            sublime.set_timeout(lambda: callback(), 0)
+            kwargs = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
 
-        import threading
-        threading.Thread(target=worker).start()
+            try:
+                proc = subprocess.Popen(
+                    args, shell=False,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    **kwargs)
+                output, _ = proc.communicate()
+            except Exception as e:
+                fail("Error while running AConv.exe:\n\n" + str(e))
+                return
 
-    def after_conversion(self):
-        sublime.set_timeout(self.finish_conversion, 0)
+            if proc.returncode != 0:
+                text = decode_output(output).strip()
+                print(text)
+                tail = "\n".join(text.splitlines()[-5:])
+                fail("AConv.exe failed (exit code {}):\n\n{}".format(proc.returncode, tail))
+                return
 
-    def finish_conversion(self):
-        if self.mode == "clip":
-            self.apply_clipboard()
+            sublime.set_timeout(callback, 0)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_conversion(self, ctx):
+        # ctx is a snapshot taken when the conversion started, so overlapping
+        # conversions do not see each other's state.
+        if ctx["mode"] == "clip":
+            self.apply_clipboard(ctx)
             return
 
-        view = self.window.open_file(self.output_path)
-        view.set_read_only(True)
-        view.set_status('rostate', '[READONLY]')
+        open_read_only(self.window, ctx["output_path"])
 
-    def apply_clipboard(self):
-        encoding_name = self.ENCODINGS.get(self.encoding_tag)
+    def apply_clipboard(self, ctx):
+        view = ctx["view"]
+        if not view.is_valid():
+            sublime.status_message("AConv: the target view was closed.")
+            return
+        if view.is_read_only():
+            sublime.error_message("AConv: the view is read-only, the converted text cannot be inserted.")
+            return
+
+        encoding_name = self.ENCODINGS.get(ctx["encoding_tag"])
         if encoding_name:
-            self.view.set_encoding(encoding_name)
+            view.set_encoding(encoding_name)
 
         result = sublime.get_clipboard()
-        if not self.use_only_what_is_selected:
-            self.view.run_command("select_all")
-        self.view.run_command("insert", {"characters": result})
+        if not ctx["use_only_what_is_selected"]:
+            view.run_command("select_all")
+        view.run_command("insert", {"characters": result})
 
-        if self.line_ending_mode == "unix":
-            self.view.set_line_endings("unix")
-        elif self.line_ending_mode == "windows":
-            self.view.set_line_endings("windows")
+        if ctx["line_ending_mode"] == "unix":
+            view.set_line_endings("unix")
+        elif ctx["line_ending_mode"] == "windows":
+            view.set_line_endings("windows")
 
 
     def load_config(self, plugin_dir):
@@ -123,6 +165,15 @@ class AconvRunCommand(sublime_plugin.WindowCommand):
                         elif section == "PROFILES_CLIPBOARD_DISABLED":
                             config["PROFILES_CLIPBOARD_DISABLED"].add(line)
 
+            # Every profile ends with "<line ending mode> <encoding tag>".
+            for plat, modes in config["PROFILES"].items():
+                for mode, profiles in modes.items():
+                    for name, args in profiles:
+                        if len(args) < 2:
+                            raise ValueError(
+                                "Profile \"{}\" in [PROFILES.{}.{}] needs a line-ending mode and an encoding tag at the end.".format(
+                                    name, plat, mode))
+
             # Assign to class
             self.PLATFORMS = config["PLATFORMS"]
             self.DIRECTIONS = config["DIRECTIONS"]
@@ -155,22 +206,32 @@ class AconvRunCommand(sublime_plugin.WindowCommand):
             return
 
         if self.view.is_dirty():
-            sublime.error_message("The file has unsaved changes. An older version from disk will be used.")
+            sublime.status_message("AConv: the file has unsaved changes, the version from disk is used.")
 
-        cmd = [exe, "-i", self.to_exe_path(input_path), "-detect", "-dict", self.to_exe_path(dict_path)]
+        cmd = [exe, "-i", self.to_exe_path(input_path), "-detect", "-dict", self.to_exe_path(dict_path), "-log", "errors"]
 
-        try:
-            output = subprocess.check_output(cmd, shell=False, stderr=subprocess.STDOUT)
-            buff = output.decode("cp1250", errors="replace").replace("\r", "")
+        def worker():
+            kwargs = {}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            try:
+                output = subprocess.check_output(
+                    cmd, shell=False, stderr=subprocess.STDOUT, **kwargs)
+            except Exception as e:
+                message = "Detect error:\n\n" + str(e)
+                sublime.set_timeout(lambda: sublime.error_message(message), 0)
+                return
 
-            # sublime.active_window().run_command("show_panel", {"panel": "console"})
-            sublime.active_window().run_command("cls")
+            buff = decode_output(output)
 
-            print(buff)
-            sublime.message_dialog(buff)
+            def show():
+                sublime.active_window().run_command("cls")
+                print(buff)
+                sublime.message_dialog(buff)
 
-        except Exception as e:
-            sublime.error_message("Detect error:\n\n" + str(e))
+            sublime.set_timeout(show, 0)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # 1) PLATFORM
     def run(self):
@@ -200,8 +261,17 @@ class AconvRunCommand(sublime_plugin.WindowCommand):
             self.run_detect()
             return
 
-        index -= 1
-        self.platform = ["Amiga", "Atari", "ZX", "Win"][index]
+        # Platform ids are the [DIRECTIONS.<id>] section names; the labels in
+        # [PLATFORMS] contain the id (e.g. "🌈 ZX Spectrum" -> "ZX").
+        label = self.PLATFORMS[index - 1][0].lower()
+        self.platform = next(
+            (plat for plat in self.DIRECTIONS if plat.lower() in label), None)
+        if self.platform is None:
+            sublime.error_message(
+                "AConv.cfg: no [DIRECTIONS.<platform>] section matches the platform \"{}\".".format(
+                    self.PLATFORMS[index - 1][0]))
+            return
+
         self.show_direction_menu()
 
     # 2) DIRECTION (Windows ↔ Platform)
@@ -301,10 +371,11 @@ class AconvRunCommand(sublime_plugin.WindowCommand):
 
         if not is_clipboard:
             if not input_path:
-                sublime.error_message("The file is not saved. An older version from disk will be used.")
+                sublime.error_message("The file is not saved. Save it first or use the clipboard mode.")
+                return
 
             if self.view.is_dirty():
-                sublime.error_message("The file has unsaved changes. An older version from disk will be used.")
+                sublime.status_message("AConv: the file has unsaved changes, the version from disk is used.")
 
         suffix = self.suffix_output_filename
         use_only_what_is_selected = (self.use_only_what_is_selected == "true" or self.use_only_what_is_selected == "yes" or self.use_only_what_is_selected == "1")
@@ -366,14 +437,19 @@ class AconvRunCommand(sublime_plugin.WindowCommand):
             fixed_args.append("ansi")
 
         full_args.extend(fixed_args)
+        full_args.extend(["-log", "errors"])
 
-        self.encoding_tag = encoding_tag
-        self.line_ending_mode = line_ending_mode
-        self.use_only_what_is_selected = use_only_what_is_selected
+        ctx = {
+            "mode": self.mode,
+            "view": self.view,
+            "output_path": output_path,
+            "encoding_tag": encoding_tag,
+            "line_ending_mode": line_ending_mode,
+            "use_only_what_is_selected": use_only_what_is_selected,
+        }
 
         try:
-            self.output_path = output_path
-            self.run_process_async(full_args, self.after_conversion)
+            self.run_process_async(full_args, lambda: self.finish_conversion(ctx))
 
         except Exception as e:
             sublime.error_message("Error while running AConv.exe:\n" + str(e))
